@@ -1,0 +1,169 @@
+require 'catpaws/ec2'
+
+# make sure these various environment variables are set 
+# on your local machine. 
+set :aws_access_key,  ENV['AMAZON_ACCESS_KEY']
+set :aws_secret_access_key , ENV['AMAZON_SECRET_ACCESS_KEY']
+set :ec2_url, ENV['EC2_URL']
+set :key, ENV['EC2_KEY']
+set :ssh_options, {
+  :keys => [ENV['EC2_KEYFILE']],
+  :user => "ubuntu"
+}
+set :sudo_password, ''
+set :ami, 'ami-52794c26' #32-bit ubuntu server (eu-west-1)
+set :instance_type, 'm1.small'
+set :working_dir, '/mnt/astrocytes'
+set :script_dir, '/mnt/scripts'
+set :status_file, 'status.txt'
+
+set :group_name, 'restchipseq_macs'
+set :nhosts, 1 
+
+desc "About this project"
+task :about, :hosts => 'localhost' do
+puts <<eos
+ Project:      REST/NRSF in Astrocytes
+ Experiment:   REST ChIPseq in WT Astrocytes (from NS5 NSCs)
+ Publication:
+ Author:       Manuela Volta
+ Author:       Chiara Soldati
+ Author:       Cass Johnston
+ Author:       Noel Buckley
+ Contact:      Cass Johnston
+ Email:        caroline.johnston@kcl.ac.uk
+eos
+end
+
+set :ip,  '/space/cassj/manu_rest_project/RESTChIP/ToBAM/results/IP_mm9.txt.gz'
+set :input,  '/space/cassj/manu_rest_project/RESTChIP/ToBAM/results/Input_mm9.txt.gz'
+
+unless File::exists?( ip ) 
+  raise "file #{ip} not found. Check the Capfile in ToBam"
+end
+
+unless File::exists?( input ) 
+  raise "file #{input} not found. Check the Capfile in ToBam"
+end
+
+set :git_url, 'http://github.com/cassj/manu_rest_project/raw/master/RESTChIP/Macs/scripts'
+
+desc "install R"
+task :install_r, :roles => group_name do
+  sudo "apt-get update"
+  sudo "mkdir -p #{script_dir}"
+  user = variables[:ssh_options][:user]
+  sudo "chown #{user} #{script_dir}"
+  sudo 'apt-get -y install r-base'
+  sudo 'apt-get -y install build-essential libxml2 libxml2-dev libcurl3 libcurl4-openssl-dev'
+  run "wget '#{git_url}/R_setup.R' -O #{script_dir}/R_setup.R"
+  sudo "Rscript #{script_dir}/R_setup.R"
+
+end
+before 'install_r', 'EC2:start'
+
+
+desc "upload mm9 Input file"
+task :upload_input, :roles => group_name do
+   upload(input, "#{working_dir}/input.txt.gz")
+   run "cd #{working_dir} && rm -f input.txt"
+   run "cd #{working_dir} && gunzip input.txt.gz"
+end
+before "upload_input", "EC2:start"
+
+desc "upload mm9 IP file"
+task :upload_ip, :roles => group_name do
+   upload(ip, "#{working_dir}/ip.txt.gz")
+   run "cd #{working_dir} && rm -f ip.txt"
+   run "cd #{working_dir} && gunzip ip.txt.gz"
+end
+before "upload_ip", "EC2:start"
+
+desc "make bed files from txt files"
+task :make_bed, :roles => group_name do
+  run "cd #{script_dir} && rm -f sorted2bed.pl"
+  run "wget '#{git_url}/sorted2bed.pl' -O #{script_dir}/sorted2bed.pl"
+  run "cd #{script_dir} && chmod +x sorted2bed.pl"
+  run "cd #{working_dir} && #{script_dir}/sorted2bed.pl input.txt > input.bed"
+  run "cd #{working_dir} && #{script_dir}/sorted2bed.pl ip.txt > ip.bed"
+end 
+before 'make_bed', 'EC2:start'
+
+desc "install macs software"
+task :install_macs, :roles => group_name do
+  sudo "apt-get install -y python"
+  run "cd #{working_dir} && wget --http-user macs --http-passwd chipseq http://liulab.dfci.harvard.edu/MACS/src/MACS-1.4.0beta.tar.gz"
+  run "cd #{working_dir} && tar -xvzf MACS-1.4.0beta.tar.gz"
+  run "cd #{working_dir}/MACS-1.4.0beta && sudo python setup.py install"
+  sudo "ln -s /usr/local/bin/macs14 /usr/local/bin/macs"
+end
+before "install_macs", 'EC2:start'
+
+
+desc "run macs"
+task :run_macs, :roles => group_name do
+  #using default p val of 1e-5
+  run "cd #{working_dir} && macs -t ip.bed -c input.bed -f BED -g mm --bw 250 --mfold 10,30"
+end
+before 'run_macs', 'EC2:start'
+
+
+desc "convert Macs peaks to IRanges"
+task :macs_to_iranges, :roles => group_name do
+  run "cd #{script_dir} && rm -f peaksBed2IRanges.R"
+  run "wget '#{git_url}/peaksBed2IRanges.R' -O #{script_dir}/peaksBed2IRanges.R"
+  run "cd #{script_dir} && chmod +x peaksBed2IRanges.R"
+  run "cd #{working_dir} && Rscript #{script_dir}/peaksBed2IRanges.R NA_peaks.xls"
+end 
+before 'macs_to_iranges', 'EC2:start'
+
+
+desc "annotate IRanges"
+task :annotate, :roles => group_name do
+  run "cd #{script_dir} && rm -f mm9RDtoGenes.R"
+  run "wget '#{git_url}/mm9RDtoGenes.R' -O #{script_dir}/mm9RDtoGenes.R"
+  run "cd #{script_dir} && chmod +x mm9RDtoGenes.R"
+  run "cd #{working_dir} && Rscript #{script_dir}/mm9RDtoGenes.R NA_peaks.RangedData.RData"
+end
+before 'annotate', 'EC2:start'
+
+
+# add ngs/plot_nearest.R on all the nearest files.
+desc "Generate various plots relating peaks to genes"
+task :plot_nearest, :roles => group_name do
+  run "cd #{script_dir} && rm -f plot_nearest.R"
+  run "wget '#{git_url}/plot_nearest.R' -O #{script_dir}/plot_nearest.R"
+  run "cd #{script_dir} && chmod +x plot_nearest.R"
+  run "cd #{working_dir} && Rscript #{script_dir}/plot_nearest.R nearest_tss.csv"
+  run "cd #{working_dir} && Rscript #{script_dir}/plot_nearest.R nearest_tes.csv"
+  run "cd #{working_dir} && Rscript #{script_dir}/plot_nearest.R nearest_mirna.csv"
+  run "cd #{working_dir} && Rscript #{script_dir}/plot_nearest.R nearest_nearest.csv"
+end
+before 'annotate', 'EC2:start'
+
+
+desc "fetch sequence data for peaks"
+task :get_seqs, :roles => group_name do
+  run "cd #{script_dir} && rm -f rd_fetch_mm9_seqs.R"
+  run "wget '#{git_url}/rd_fetch_mm9_seqs.R' -O #{script_dir}/rd_fetch_mm9_seqs.R"
+  run "cd #{script_dir} && chmod +x rd_fetch_mm9_seqs.R"
+  run "cd #{working_dir} && Rscript #{script_dir}/rd_fetch_mm9_seqs.R NA_peaks.RangedData.RData"
+end
+before 'get_seqs', 'EC2:start'
+
+
+desc "compress results"
+task :pack_macs, :roles => group_name do
+   run "cd #{working_dir} && rm -f macs.tgz"
+   run "cd #{working_dir} && tar -cvzf macs.tgz NA*"
+end
+before 'pack_macs', 'EC2:start'
+
+desc "fetch_results"
+task :fetch_results, :roles => group_name do
+   `rm -Rf results`
+   `mkdir results`
+   download("#{working_dir}/macs.tgz", "results/macs.tgz")
+   `cd resu;ts && tar -xvzf macs.tgz && rm macs.tgz`
+end 
+before 'fetch_results', 'EC2:start'

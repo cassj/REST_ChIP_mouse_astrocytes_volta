@@ -1,0 +1,145 @@
+require 'catpaws/ec2'
+
+set :aws_access_key,  ENV['AMAZON_ACCESS_KEY']
+set :aws_secret_access_key , ENV['AMAZON_SECRET_ACCESS_KEY']
+set :ec2_url, ENV['EC2_URL']
+set :key, ENV['EC2_KEY'] #this should be the name of the key in aws, not the actual keyfile
+set :ssh_options, {
+  :keys => [ENV['EC2_KEYFILE']],
+  :user => "ubuntu"
+}
+set :sudo_password, ''
+set :ami, 'ami-fabe948e' #32-bit ubuntu server (eu-west-1)
+set :instance_type, 'm1.small'
+set :working_dir, '/mnt/astrocytes'
+set :script_dir, '/mnt/scripts'
+set :status_file, 'status.txt'
+
+set :group_name, 'restchipseq_quest'
+set :nhosts, 1 
+
+desc "About this project"
+task :about, :hosts => 'localhost' do
+puts <<eos
+ Project:      REST/NRSF in Astrocytes
+ Experiment:   REST ChIPseq in WT Astrocytes (from NS5 NSCs)
+ Publication:
+ Author:       Manuela Volta
+ Author:       Chiara Soldati
+ Author:       Cass Johnston
+ Author:       Noel Buckley
+ Contact:      Cass Johnston
+ Email:        caroline.johnston@kcl.ac.uk
+eos
+end
+
+set :ip,  '/space/cassj/manu_rest_project/RESTChIP/ToBAM/results/IP_mm9.txt.gz'
+set :input,  '/space/cassj/manu_rest_project/RESTChIP/ToBAM/results/Input_mm9.txt.gz'
+
+desc "install quest"
+task :install_quest, :roles => group_name do
+  run "sudo apt-get update && sudo apt-get install -y build-essential"
+  run "cd #{working_dir} && wget http://mendel.stanford.edu/SidowLab/downloads/quest/QuEST_2.4.tar.gz"
+  run "cd #{working_dir} && tar -xvzf QuEST_2.4.tar.gz"
+  run "cd #{working_dir}/QuEST_2.4 && ./configure.pl"
+  run "cd #{working_dir}/QuEST_2.4 && make"
+end 
+before 'install_quest', 'EC2:start'
+
+
+desc "upload mm9 Input file"
+task :upload_input, :roles => group_name do
+   upload(input, "#{working_dir}/input.txt.gz")
+   run "cd #{working_dir} && rm -f input.txt"
+   run "cd #{working_dir} && gunzip input.txt.gz"
+end
+before "upload_input", "EC2:start"
+
+desc "upload mm9 IP file"
+task :upload_ip, :roles => group_name do
+   upload(ip, "#{working_dir}/ip.txt.gz")
+   run "cd #{working_dir} && rm -f ip.txt"
+   run "cd #{working_dir} && gunzip ip.txt.gz"
+end
+before "upload_ip", "EC2:start"
+
+
+#ok, we're good to here. now figure out how to run the damn thing.
+#seems to need user input, can we get around that?
+#what does it take as input? 
+
+desc "make bed files from txt files"
+task :make_bed, :roles => group_name do
+  run "cd #{working_dir} && rm -f sorted2bed.pl"
+  run "cd #{working_dir} && wget http://github.com/cassj/my_bioinfo_scripts/raw/master/ngs/illumina/sorted2bed.pl"
+  run "cd #{working_dir} && chmod +x sorted2bed.pl"
+  run "cd #{working_dir} && #{working_dir}/sorted2bed.pl input.txt > input.bed"
+  run "cd #{working_dir} && #{working_dir}/sorted2bed.pl ip.txt > ip.bed"
+end 
+before 'make_bed', 'EC2:start'
+
+desc "install macs software"
+task :install_macs, :roles => group_name do
+  sudo "apt-get install -y python"
+  run "cd #{working_dir} && wget --http-user macs --http-passwd chipseq http://liulab.dfci.harvard.edu/MACS/src/MACS-1.4.0beta.tar.gz"
+  run "cd #{working_dir} && tar -xvzf MACS-1.4.0beta.tar.gz"
+  run "cd #{working_dir}/MACS-1.4.0beta && sudo python setup.py install"
+  sudo "ln -s /usr/local/bin/macs14 /usr/local/bin/macs"
+end
+before "install_macs", 'EC2:start'
+
+
+desc "run macs"
+task :run_macs, :roles => group_name do
+  run "cd #{working_dir} && rm -Rf run*"
+  run "cd #{working_dir} && rm -Rf multi_macs.pl"
+  run "cd #{working_dir} && wget http://github.com/cassj/my_bioinfo_scripts/raw/master/ngs/macs/multi_macs.pl"
+  run "chmod +x #{working_dir}/multi_macs.pl"
+  #using default p val of 1e-5
+  run "cd #{working_dir} && macs -t ip.bed -c input.bed -f BED -g mm --bw 250 --mfold 10,30"
+
+end
+before 'run_macs', 'EC2:start'
+
+
+desc "convert Macs peaks to IRanges"
+task :macs_to_iranges, :roles => group_name do
+    run "cd #{working_dir} && rm -f peaksBed2IRanges.R"
+    run "cd #{working_dir} && wget http://github.com/cassj/my_bioinfo_scripts/raw/master/ngs/macs/peaksBed2IRanges.R"
+    run "cd #{working_dir} && chmod +x peaksBed2IRanges.R"
+    run "cd #{working_dir} && Rscript peaksBed2IRanges.R NA_peaks.xls"
+end 
+before 'macs_to_iranges', 'EC2:start'
+
+
+desc "annotate IRanges"
+task :annotate, :roles => group_name do
+    run "cd #{working_dir} && rm -f mm9RDtoGenes.R"
+    run "cd #{working_dir} && wget http://github.com/cassj/my_bioinfo_scripts/raw/master/ngs/mm9RDtoGenes.R"
+    run "cd #{working_dir} && chmod +x mm9RDtoGenes.R"
+    run "cd #{working_dir} && Rscript mm9RDtoGenes.R NA_peaks.RangedData.R"
+end
+before 'annotate', 'EC2:start'
+
+desc "fetch sequence data for peaks"
+task :get_seqs, :roles => group_name do
+    run "cd #{working_dir} && rm -f rd_fetch_mm9_seqs.R"
+    run "cd #{working_dir} && wget http://github.com/cassj/my_bioinfo_scripts/raw/master/ngs/rd_fetch_mm9_seqs.R"
+    run "cd #{working_dir} && chmod +x rd_fetch_mm9_seqs.R"
+    run "cd #{working_dir} && Rscript rd_fetch_mm9_seqs.R NA_peaks.AnnoRangedData.R all"
+end
+before 'get_seqs', 'EC2:start'
+
+desc "compress results"
+task :pack_macs, :roles => group_name do
+   run "cd #{working_dir} && rm -f macs.tgz"
+   run "cd #{working_dir} && tar -cvzf macs.tgz NA*"
+end
+before 'pack_macs', 'EC2:start'
+
+desc "fetch_results"
+task :fetch_results, :roles => group_name do
+   download("#{working_dir}/macs.tgz", "macs.tgz")
+   `tar -xvzf macs.tgz`
+end 
+before 'fetch_results', 'EC2:start'

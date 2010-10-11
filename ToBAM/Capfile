@@ -1,0 +1,251 @@
+##### 
+#
+# This file will generate mm9 files from the original mm8 files from GIS, and it will
+# generate bed and bam files. There's no point in realigning this data as it has been 
+# filtered to remove any reads which ELAND couldn't align and we can't get hold of 
+# the original data.
+#
+# USAGE
+#
+# You will need an AWS EC2 account to use the Capfiles
+# Please see http://aws.amazon.com/ec2/
+# Make sure you have create an ssh key in order to access
+# EC2 instances
+#
+# To use this Capfiles, you will need to have the following
+# installed (tested on Ubuntu and CentOS):
+#
+# git:        http://git-scm.com/
+# ruby:       http://ruby-lang.org/
+# RubyGems:   http://rubygems.org/
+# 
+# Install the gems you need with:
+#
+# sudo gem install capistrano
+# sudo gem install amazon-ec2
+# sudo gem install json
+#
+# Get the catpaws gem from github and build it
+# 
+# git clone git@github.com:cassj/catpaws.git
+# cd catpaws
+# rake gemspec
+# rake build
+# sudo gem install pkg/catpaws-*.gem
+# 
+# Note that this is a bit of a hack to give me Capistrano EC2:start and stop tasks.
+# At some point I will come up with a better solution, I wouldn't recommend using it
+# for anything else. 
+#
+# Finally, set the following environment variables appropriately
+# for your AWS account:
+#
+# AMAZON_ACCESS_KEY
+# AMAZON_SECRET_ACCESS_KEY
+# EC2_URL (defaults to us-east-1.ec2.amazonaws.com)
+# EC2_KEY (the name of the key registered with EC2, with which you will access )
+# EC2_KEYFILE (the location of the key file. Alternatively, you can use ssh-agent)
+# 
+
+#####
+
+##### 
+#
+# CONFIGURATION 
+#
+#####
+
+require 'catpaws/ec2'
+
+set :aws_access_key,  ENV['AMAZON_ACCESS_KEY']
+set :aws_secret_access_key , ENV['AMAZON_SECRET_ACCESS_KEY']
+set :ec2_url, ENV['EC2_URL']
+set :key, ENV['EC2_KEY']
+set :ssh_options, {
+  :keys => [ENV['EC2_KEYFILE']],
+  :user => "ubuntu"
+}
+set :sudo_password, ''
+set :ami, 'ami-52794c26' #32-bit ubuntu server (eu-west-1)
+set :instance_type, 'm1.small'
+set :working_dir, '/mnt/astrocytes'
+set :script_dir, '/mnt/scripts'
+
+set :group_name, 'restchipseq'
+set :nhosts, 2 # one per file
+
+set :git_url, ''
+
+
+
+
+#### About #####
+
+desc "About this project"
+task :about, :hosts => 'localhost' do
+puts <<eos
+ Project:      REST/NRSF in Astrocytes
+ Experiment:   REST ChIPseq in WT Astrocytes (from NS5 NSCs)
+ Publication:  
+ Author:       Manuela Volta
+ Author:       Chiara Soldati
+ Author:       Cass Johnston
+ Author:       Noel Buckley
+ Contact:      Cass Johnston 
+ Email:        caroline.johnston@kcl.ac.uk
+eos
+end
+
+
+
+#### Tasks ####
+
+desc "install R on all running instances in group group_name"
+task :install_r, :roles  => group_name do
+  sudo "mkdir -p #{script_dir}"
+  user = variables[:ssh_options][:user]
+  sudo "chown #{user} #{script_dir}"
+  sudo 'apt-get -y install r-base'
+  sudo 'apt-get -y install build-essential libxml2 libxml2-dev libcurl3 libcurl4-openssl-dev'
+  run "wget 'http://github.com/cassj/manu_rest_project/raw/master/R_setup.R' -O #{script_dir}/R_setup.R"
+  sudo "Rscript #{script_dir}/R_setup.R"
+end
+before "install_r", "EC2:start"
+  
+
+desc "fetch the read data to an EC2 instance"
+task :get_read_data, :roles => group_name do
+  infiles = ["http://mng.iop.kcl.ac.uk/data_dump/CMN025_180_unique_hits.txt",
+             "http://mng.iop.kcl.ac.uk/data_dump/CMN026_026_unique_hits.txt" 
+            ]
+  outfiles = ['IP.txt', 'Input.txt']
+  hosts = instances.dns_name
+  (1..hosts.length).each { |i|
+    run("wget '#{infiles[i-1]}' -O '#{working_dir}/#{outfiles[i-1]}'",{:hosts => hosts[i-1] })
+  } 
+end
+before "get_read_data", "EC2:start"
+
+desc "remove .fa from chr names"
+task :remove_fa, :roles => group_name do
+  run "perl -pi.bak -e 's/\\.fa//g;' #{working_dir}/*.txt"
+end
+before "remove_fa", "EC2:start"
+
+
+desc "install liftOver"
+task :install_liftover, :roles => group_name do
+
+  #liftover
+  sudo 'wget -O /usr/bin/liftOver http://hgdownload.cse.ucsc.edu/admin/exe/linux.i386/liftOver'
+  sudo 'chmod +x /usr/bin/liftOver'
+
+  #chainfile - note that the script sortedmm8tomm9 expects the chain files to be in ../lib
+  run "mkdir -p #{working_dir}/lib"
+  run "wget  -O #{working_dir}/lib/mm8ToMm9.over.chain.gz 'http://hgdownload.cse.ucsc.edu/goldenPath/mm8/liftOver/mm8ToMm9.over.chain.gz'"
+  run "gunzip -c #{working_dir}/lib/mm8ToMm9.over.chain.gz > #{working_dir}/lib/mm8ToMm9.over.chain"
+  run "wget -O #{script_dir}/sortedmm8tomm9.R  '#{git_url}/sortedmm8tomm9.R'"
+  run "chmod +x #{script_dir}/sortedmm8tomm9.R"
+
+end 
+before "install_liftover", "EC2:start"
+
+
+desc "liftOver ELAND mm8 positions to mm9"
+task :liftOver, :roles => group_name do
+
+  infiles = ['IP.txt', 'Input.txt']
+  hosts = instances.dns_name
+  (2..hosts.length).each { |i|
+    run ("cd #{working_dir} && #{script_dir}/sortedmm8tomm9.R #{infiles[l-1]}" ,{:hosts => hosts[i-1] })
+  } 
+
+end
+before "liftOver", "EC2:start"
+
+
+desc "Remove anything mapping to a random chr"
+task :remove_random, :roles => group_name do
+  run "cd #{working_dir} && perl -ni.bak -e 'print $_ unless /.*random.*/;' *_mm9.txt"
+end
+before "remove_random", "EC2:start"
+
+
+desc "Install Samtools"
+task :install_samtools, :roles => group_name do
+  run "wget http://downloads.sourceforge.net/project/samtools/samtools/0.1.8/samtools-0.1.8.tar.bz2?r=http%3A%2F%2Fsourceforge.net%2Fprojects%2Fsamtools%2Ffiles%2F&ts=1283912747&use_mirror=ovh"
+  run "tar -xvjf samtools-0.1.8.tar.bz2" 
+  sudo "apt-get -y install zlib1g zlib1g-dev"
+  run "cd samtools* && make && make razip" 
+  run "cd /home/ubuntu/samtools* && sudo cp samtools /usr/local/bin/"
+  run "cd /home/ubuntu/samtools* && sudo cp razip /usr/local/bin/"
+  run "cd /home/ubuntu/samtools* && sudo cp misc/*.pl /usr/local/bin/"
+  run "cd /home/ubuntu/samtools* && sudo cp misc/maq2sam-long /usr/local/bin/"
+  run "cd /home/ubuntu/samtools* && sudo cp misc/maq2sam-short /usr/local/bin/"
+  run "cd /home/ubuntu/samtools* && sudo cp misc/md5fa /usr/local/bin/"
+  run "cd /home/ubuntu/samtools* && sudo cp misc/md5sum-lite /usr/local/bin/"
+  run "cd /home/ubuntu/samtools* && sudo cp misc/varfilter.py /usr/local/bin/"
+  run "cd /home/ubuntu/samtools* && sudo cp misc/wgsim /usr/local/bin/"
+end
+before "install_samtools", "EC2:start"
+
+
+desc "Convert sorted to SAM format"
+task :to_sam, :roles => group_name do
+  run "wget  -O #{script_dir}/sorted2sam.pl '#{git_url}/sorted2sam.pl'"   
+   run "chmod +x #{script_dir}/sorted2sam.pl"
+   run "cd #{working_dir} && perl #{script_dir}/sorted2sam.pl *_mm9.txt > reads.sam"
+end
+before "to_sam", "EC2:start"
+
+desc "Convert SAM to BAM"
+task :to_bam, :roles => group_name do
+   run "wget -O #{script_dir}/mm9_lengths  '#{git_url}/mm9_lengths'"
+   run "cd #{working_dir} && samtools view -bt #{script_dir}/mm9_lengths -o reads.bam reads.sam"
+end
+before "to_bam", "EC2:start"
+
+
+desc "Sort BAM"
+task :sort_bam, :roles => group_name do
+   run "cd #{working_dir} && samtools sort reads.bam reads_sorted"
+end
+before "sort_bam", "EC2:start"
+
+desc "Remove PCR Duplicates"
+task :rm_dups, :roles => group_name do
+  run "cd #{working_dir} && samtools rmdup -s reads_sorted.bam reads_sorted_nodup.bam"
+end
+before "rm_dups", "EC2:start"
+
+desc "Index BAM files"
+task :index_bam, :roles => group_name do
+  run "cd #{working_dir} && samtools index reads_sorted_nodup.bam"
+end
+before "index_bam", "EC2:start"
+
+desc "get results"
+task :get_results, :roles => group_name do  
+  system("mkdir -p results")
+  hosts = instances.dns_name
+  names = ['IP','Input']
+  (1..hosts.length).each { |i|
+    download("#{working_dir}/#{names[i-1]}_mm9.txt", "results/#{names[i-1]}_mm9.txt", { :hosts => hosts[i-1] })
+    download("#{working_dir}/reads_sorted_nodup.bam", "results/#{names[i-1]}.bam", { :hosts => hosts[i-1] })
+    download("#{working_dir}/reads_sorted_nodup.bam.bai", "results/#{names[i-1]}.bai", { :hosts => hosts[i-1] })
+  }
+
+end 
+before "get_results","EC2:start"
+
+
+
+
+
+
+
+
+
+
+
+
