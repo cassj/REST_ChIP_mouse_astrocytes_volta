@@ -1,7 +1,50 @@
+###############################################################
+# This Capfile will run the peak-finding algorithm Macs on the data.
+#
+# USAGE
+#
+# You will need an AWS EC2 account to use the Capfiles
+# Please see http://aws.amazon.com/ec2/
+# Make sure you have create an ssh key in order to access
+# EC2 instances
+#
+# To use this Capfiles, you will need to have the following
+# installed (tested on Ubuntu and CentOS):
+#
+# git:        http://git-scm.com/
+# ruby:       http://ruby-lang.org/
+# RubyGems:   http://rubygems.org/
+# 
+# Install the gems you need with:
+#
+# sudo gem install capistrano
+# sudo gem install amazon-ec2
+# sudo gem install json
+#
+# Get the catpaws gem from github and build it
+# 
+# git clone git@github.com:cassj/catpaws.git
+# cd catpaws
+# rake gemspec
+# rake build
+# sudo gem install pkg/catpaws-*.gem
+# 
+# Note that this is a bit of a hack to give me Capistrano EC2:start and stop tasks.
+# At some point I will come up with a better solution, I wouldn't recommend using it
+# for anything else. 
+#
+# Finally, set the following environment variables appropriately
+# for your AWS account:
+#
+# AMAZON_ACCESS_KEY
+# AMAZON_SECRET_ACCESS_KEY
+# EC2_URL (defaults to us-east-1.ec2.amazonaws.com)
+# EC2_KEY (the name of the key registered with EC2, with which you will access )
+# EC2_KEYFILE (the location of the key file. Alternatively, you can use ssh-agent)
+# 
+#####
 require 'catpaws/ec2'
 
-# make sure these various environment variables are set 
-# on your local machine. 
 set :aws_access_key,  ENV['AMAZON_ACCESS_KEY']
 set :aws_secret_access_key , ENV['AMAZON_SECRET_ACCESS_KEY']
 set :ec2_url, ENV['EC2_URL']
