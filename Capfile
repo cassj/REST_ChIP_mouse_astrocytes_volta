@@ -51,15 +51,26 @@ set :git_url, 'http://github.com/cassj/REST_ChIP_mouse_astrocytes_volta/raw/mast
 
 #### Tasks ####
 
-desc "install R on all running instances in group group_name"
-task :install_r, :roles  => group_name do
-  user = variables[:ssh_options][:user]
-  sudo 'apt-get update'
-  sudo 'apt-get -y install r-base'
-  sudo 'apt-get -y install build-essential libxml2 libxml2-dev libcurl3 libcurl4-openssl-dev'
-  run "wget --no-check-certificate '#{git_url}/scripts/R_setup.R' -O #{working_dir}/R_setup.R"
-  run "cd #{working_dir} && chmod +x R_setup.R"
-  sudo "Rscript #{working_dir}/R_setup.R"
+
+desc "upload BAM files"
+task :upload_bam, :roles => group_name do
+  run "mkdir #{mount_point}/BAM"
+  `cd ToBAM/results && tar -cvzf bamfiles.tgz *.ba*`
+  upload("ToBAM/results/bamfiles.tgz", "#{mount_point}/BAM/bamfiles.tgz")
+  run "cd #{mount_point}/BAM && tar -xvzf bamfiles.tgz"
+  run "cd #{mount_point}/BAM && rm bamfiles.tgz"
 end
-before "install_r", "EC2:start"
+before 'upload_bam','EC2:start'
+
+
+desc "upload Macs files"
+task :upload_macs, :roles => group_name do
+  run "mkdir #{mount_point}/Macs"
+  `cd Macs/results && tar -cvzf macsfiles.tgz *`
+  upload("Macs/results/macsfiles.tgz", "#{mount_point}/Macs/macsfiles.tgz")
+  run "cd #{mount_point}/Macs && tar -xvzf macsfiles.tgz"
+  run "cd #{mount_point}/Macs && rm macsfiles.tgz"
+end
+before 'upload_macs','EC2:start'
+
 
