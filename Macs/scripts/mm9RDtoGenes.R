@@ -92,17 +92,17 @@ ord <- as.character(rd.df$names)
 nearest.tss <- as.data.frame(nearest.tss)
 rownames(nearest.tss) <- as.character(nearest.tss$peak)
 nearest.tss <- nearest.tss[ord,]
-nearest.tss <- cbind(nearest.tss,overlapping.exon, vals)
+nearest.tss <- cbind(nearest.tss,overlapping.exon, type="TSS", vals)
 
 nearest.tes <- as.data.frame(nearest.tes)
 rownames(nearest.tes) <- as.character(nearest.tes$peak)
 nearest.tes <- nearest.tes[ord,]
-nearest.tes <- cbind(nearest.tes, overlapping.exon, vals)
+nearest.tes <- cbind(nearest.tes, overlapping.exon, type="TES", vals)
 
 nearest.mirna <- as.data.frame(nearest.mirna)
 rownames(nearest.mirna) <- as.character(nearest.mirna$peak)
-nearest.mirna <- nearest.tes[ord,]
-nearest.mirna <- cbind(nearest.mirna, overlapping.exon, vals)
+nearest.mirna <- nearest.mirna[ord,]
+nearest.mirna <- cbind(nearest.mirna, overlapping.exon, type="miRNA", vals)
 
 
 
@@ -137,20 +137,25 @@ rownames(annot) <- annot[,"ensembl_gene_id"]
 
 
 #add the annotation to your nearest info
-nearest.tss <- cbind(nearest.tss, annot[nearest.tss[,"feature"],c("mgi_symbol","description")])
-nearest.tss <- cbind(nearest.tss, type="TSS")
-nearest.tes <- cbind(nearest.tes, annot[nearest.tes[,"feature"],c("mgi_symbol","description")])
-nearest.tes <- cbind(nearest.tes, type="TES")
-nearest.mirna <- cbind(nearest.mirna, annot[nearest.mirna[,"feature"], c("mgi_symbol", "description")])
-nearest.mirna <- cbind(nearest.mirna, type="miRNA")
+nearest.tss <-   cbind(nearest.tss,     annot[nearest.tss[,"feature"],   c("mgi_symbol", "description")])
+nearest.tes <-   cbind(nearest.tes,     annot[nearest.tes[,"feature"],   c("mgi_symbol", "description")])
+nearest.mirna <- cbind(nearest.mirna,   annot[nearest.mirna[,"feature"], c("mgi_symbol", "description")])
 
 
 # make a table of nearest overall
 nearest.nearest <- nearest.tss
 smaller <- which( abs(nearest.nearest$distancetoFeature) > abs(nearest.tes$distancetoFeature) )
-nearest.nearest[smaller,] <- nearest.tes[smaller,]
+if (length(smaller)>0) nearest.nearest[smaller,] <- nearest.tes[smaller,]
 smaller <- which( abs(nearest.nearest$distancetoFeature) > abs(nearest.mirna$distancetoFeature) )
-nearest.nearest[smaller,] <- nearest.mirna[smaller,]
+if (length(smaller)>0) nearest.nearest[smaller,] <- nearest.mirna[smaller,]
+
+#reorder
+
+colnms <- qw(space, start, end, width, names, peak, strand, feature, start_position, end_position, insideFeature,distancetoFeature, shortestDistance,fromOverlappingOrNearest,overlapping.exon, type, mgi_symbol, description , Length, Summit, nTags,neg10log10pVal, FoldEnrichment, FDR )
+nearest.tss <- nearest.tss[,colnms]
+nearest.tes <- nearest.tes[,colnms]
+nearest.mirna <- nearest.mirna[,colnms]
+nearest.nearest <- nearest.nearest[,colnms]
 
 
 #save the results as csv and rd?

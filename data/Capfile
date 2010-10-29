@@ -1,0 +1,55 @@
+###
+# Upload the data to an EBS volume and snapshot it.
+
+require 'catpaws'
+
+#generic settings
+set :aws_access_key,  ENV['AMAZON_ACCESS_KEY']
+set :aws_secret_access_key , ENV['AMAZON_SECRET_ACCESS_KEY']
+set :ec2_url, ENV['EC2_URL']
+set :ssh_options, { :user => "ubuntu", :keys=>[ENV['EC2_KEYFILE']]}
+set :key, ENV['EC2_KEY']
+set :key_file, ENV['EC2_KEYFILE']
+set :ami, 'ami-52794c26'  #EC2 eu-west-1 32bit Lucid
+set :instance_type, 'm1.small'
+set :working_dir, '/mnt/work'
+
+set :nhosts, 1
+set :group_name, 'rest_chip_mouse_astrocytes_volta_data'
+
+set :snap_id, `cat SNAPID`.chomp #ec2 eu-west-1 
+set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
+set :ebs_size, 6  #Needs to be the size of the snap plus enough space for alignments
+set :ebs_zone, 'eu-west-1a'  #wherever the ami is
+set :dev, '/dev/sdf'
+set :mount_point, '/mnt/data'
+
+
+
+#make a new EBS volume from this snap 
+#cap EBS:create
+
+#and mount your EBS
+#cap EBS:attach
+#cap EBS:format_xfs
+#cap EBS:mount_xfs
+
+set :ipfile, 'CMN025_180_unique_hits.txt'
+set :inputfile, 'CMN026_026_unique_hits.txt'
+
+
+desc "Upload data files"
+task :upload_data, :roles => group_name do
+  upload(ipfile, "#{mount_point}/#{ipfile}")
+  upload(inputfile, "#{mount_point}/#{inputfile}")
+  put("IPfile: #{ipfile}\nInputFile: #{inputfile}", "#{mount_point}/README")
+end
+before 'upload_data', 'EC2:start'
+
+
+# cap EBS:snapshot
+# cap EBS:unmount
+# cap EBS:detach
+# cap EBS:delete 
+# cap EC2:stop
+
