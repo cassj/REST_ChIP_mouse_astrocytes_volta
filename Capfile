@@ -28,11 +28,20 @@ set :nhosts, 1
 set :snap_id, `cat SNAPID`.chomp #empty until you've created a snapshot
 set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
 set :ebs_size, 12  
-set :ebs_zone, 'eu-west-1a'  #wherever your ami is. 
+set :ebs_zone, 'eu-west-1b'  #wherever your ami is. 
 set :dev, '/dev/sdf'
 set :mount_point, '/mnt/data'
 
 set :git_url, 'http://github.com/cassj/REST_ChIP_mouse_astrocytes_volta/raw/master'
+
+# Try and load a local config file to override any of the above values, should one exist.
+# So that if you change these values, they don't get overwritten if you update the repos.
+begin
+ load("Capfile.local")
+rescue Exception
+end
+
+
 
 #cap EC2:start
 #cap EBS:create (unless you want to use the one that already exists)
@@ -74,3 +83,7 @@ end
 before 'upload_macs','EC2:start'
 
 
+
+######
+
+# Validation Primers.
