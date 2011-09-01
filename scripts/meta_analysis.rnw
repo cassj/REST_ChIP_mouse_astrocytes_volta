@@ -1,0 +1,432 @@
+\documentclass[a4paper]{article}
+\begin{document}
+
+\title{Rest ChIPseq in Astro - Comparison to Other Datasets}
+\author{Manuela Volta, Cass Johnston}
+
+\maketitle
+
+
+<<echo=F>>= ** setup **
+library(IRanges)
+library(xtable)
+source('scripts/qw.R')
+source('scripts/nearest_rd.R')
+
+@
+
+
+
+<<echo=F>>= ** Load Manu Astro Rest ChIPseq Data **
+# Use run4. They're all a bit crap, but at least its
+# parameters seem reasonable.
+manu.chipseq.rd <- get(load("Macs/run4/NA_peaks.AnnoRangedData.R"))
+manu.chipseq.df <- as.data.frame(manu.chipseq.rd)
+manu.chipseq.npeaks <- nrow(manu.chipseq.rd)
+
+manu.chipseq.df<-manu.chipseq.df[order(manu.chipseq.df[,"values.neg10log10pVal"], decreasing=T),]
+
+@
+
+<<echo=F>>= ** Load Rory Johnson ESC and NS5 Rest ChIPseq Data **
+johnson.pet.esc.rd <- get(load("../Published_REST_Data/Johnson_ChIPPET/ESC/PET_data/AnnoRangedData.R"))
+johnson.pet.esc.df <- as.data.frame(johnson.pet.esc.rd)
+johnson.pet.esc.npeaks <- nrow(johnson.pet.esc.df)
+
+johnson.pet.ns5.rd <- get(load("../Published_REST_Data/Johnson_ChIPPET/NS5/PET_data/AnnoRangedData.R"))
+johnson.pet.ns5.df <- as.data.frame(johnson.pet.ns5.rd)
+johnson.pet.ns5.npeaks <- nrow(johnson.pet.ns5.df)
+@ 
+
+<<echo=F>>= ** Load Otto Rest ChIPSACO Data **
+otto.saco.rd <- get(load("../Published_REST_Data/Otto_ChIPSACO/results/saco_mm9.AnnoRangedData.R")) 
+otto.saco.df <- as.data.frame(otto.saco.rd)
+otto.saco.npeaks <- nrow(otto.saco.df)
+@ 
+
+
+
+<<echo=F>>= ** Load Johnson, Wold Human Rest ChIPseq Data **
+##Need to decide on a run for these.
+johnson.chipseq.hg19.rd <- get(load("../Published_REST_Data/Johnson_ChIPseq/Rest_Macs/run4/NA_peaks.hg19.AnnoRangedData.R"))
+johnson.chipseq.hg19.df <- as.data.frame(johnson.chipseq.hg19.rd)
+johnson.chipseq.hg19.npeaks <- nrow(johnson.chipseq.hg19.df)
+@ 
+
+<<echo=F>>= ** Load Johnson, Wold Human Rest ChIPseq Data Mapped to mm9 **
+johnson.chipseq.mm9.rd <- get(load("../Published_REST_Data/Johnson_ChIPseq/Rest_Macs/run4/NA_peaks.mm9.AnnoRangedData.R"))
+johnson.chipseq.mm9.df <- as.data.frame(johnson.chipseq.mm9.rd)
+johnson.chipseq.mm9.npeaks <- nrow(johnson.chipseq.mm9.df)
+@ 
+
+
+\section{Numbers of Peaks}
+
+<<>>=
+manu.chipseq.npeaks
+johnson.pet.esc.npeaks
+johnson.pet.ns5.npeaks
+otto.saco.npeaks
+johnson.chipseq.hg19.npeaks
+johnson.chipseq.mm9.npeaks 
+@ 
+
+
+
+
+<<echo=F>>= ** Find overlaps by mouse position on genome **
+
+rds <- list(manu.chipseq.rd, johnson.pet.esc.rd, johnson.pet.ns5.rd, otto.saco.rd, johnson.chipseq.mm9.rd)
+names(rds) <- qw(manu.chipseq.rd, johnson.pet.esc.rd, johnson.pet.ns5.rd, otto.saco.rd, johnson.chipseq.mm9.rd)
+
+#given that we're using different techniques, give a bit of leeway in the exact peak call pos:
+maxgap <- 500
+
+#perc overlap is the percentage of the query found in the subject
+
+#Note, this needs fixed - multiple is deprecated.
+ols <- list()
+ol.totals <- list()
+perc.overlap <- list()
+for(query in names(rds)){
+  ols[[query]] <- list()
+  ol.totals[[query]] <- list()
+  perc.overlap[[query]] <- list()
+  
+  for(subject in names(rds)){
+    ols[[query]][[subject]] <- findOverlaps(query=rds[[query]], subject=rds[[subject]], multiple=F, maxgap=maxgap)
+    ol.totals[[query]][[subject]] <- unlist(lapply( ols[[query]][[subject]], function(x){return(length(x[!is.na(x)]))}))
+    npeak.query <- get(gsub('rd','npeaks', query))
+    perc.overlap[[query]][[subject]] <-  100*(sum(ol.totals[[query]][[subject]])/npeak.query)
+  }
+}
+
+@ 
+
+\section{Percentage Overlaps}
+
+Percentages are relative to the number of peaks in the query (first) dataset\\
+
+<<>>= print out the results
+perc.overlap
+@ 
+
+
+
+<<echo=F>>= ** Export Manu data with overlapping positions for primers  **
+
+chrs <-  names(manu.chipseq.rd)
+rd.names <- names(rds)
+
+manu.dfs <- list()
+for(chr in chrs){
+   manu.dfs[[chr]] <- as.data.frame(manu.chipseq.rd[chr])
+   for(rd.name in rd.names){
+     these.ols <- ols[["manu.chipseq.rd"]][[rd.name]][[chr]]
+     manu.dfs[[chr]] <- cbind(manu.dfs[[chr]], as.logical(these.ols))
+     colnames( manu.dfs[[chr]])[ncol(manu.dfs[[chr]])] <- rd.name
+     
+   }
+}
+
+manu.df <- manu.dfs[[chrs[1]]]
+for(chr in chrs[-1]){
+  manu.df <- rbind(manu.df, manu.dfs[[chr]])
+}
+  
+
+# sort by pvalue and output to a csv file 
+manu.df <- cbind(manu.df, pval=10^(manu.df$values.neg10log10pVal/-10))
+manu.df <- manu.df[order( manu.df$pval ),]
+
+write.csv(manu.df, file="overlapping_published_datasets.csv", row.names=F)
+
+values <- grep('values.', colnames(manu.df), value=T)
+values <- gsub('values.', '',values)
+values <- c(values, qw( manu.chipseq.rd, johnson.pet.esc.rd, johnson.pet.ns5.rd, otto.saco.rd, johnson.chipseq.mm9.rd))
+colnames(manu.df) <- gsub('values.', '', colnames(manu.df))
+
+
+# make a new RangedData object and save it?
+manu.rd <- RangedData(ranges  = IRanges(
+                        start = manu.df$start,
+                        end   = manu.df$end,
+                        names = manu.df$name,
+                        ),
+                   space = manu.df$space,
+                   values = manu.df[,values]
+                   )
+
+save(manu.rd, file="overlapping_published_datasets.R")
+
+@ 
+
+\section{Primers}
+
+<<echo=F>>=
+
+#create a file you can give to auto_genomic_primers.pl
+wd<-getwd()
+setwd('Meta/Primers')
+
+primer.gen.file<-'for_primer_design.txt'
+for.primer.gen<-manu.df[1:8000, qw(space, start, end, names)]
+for.primer.gen[,1]<-paste("chr",for.primer.gen[,1],sep="")
+write.table(for.primer.gen, file=primer.gen.file, sep="\t", quote=F, col.names=F, row.names=F)
+
+cmd <- 'perl ../../scripts/auto_genomic_primer.pl for_primer_design.txt'
+
+
+#This can take a *long* if you make your primer gen file big
+#sp I've commented it for now
+
+#system(cmd)
+unlink(primer.gen.file)
+
+#ok, now see which we have primers for? 
+manu.df <- cbind(manu.df, Primers=NA)
+
+for (n in 1:8000){
+  cat(n,"\n")
+  fn <- paste("Primer_Report_",manu.df[n,'names'],'.txt', sep="")
+  if(file.exists(fn)){ manu.df[n, 'Primers'] <- file.path('Meta', 'Primers', fn)}
+  
+
+}
+
+write.csv(manu.df, file="overlapping_published_datasets_with_primers.csv", row.names=F)
+
+# Choosing primers to actually use for validation was done manually and the above
+# file edited accordingly.
+
+
+setwd(wd)
+
+@
+
+
+
+\section{Compare with expression data}
+
+<<echo=F>>=  ** Load expression data **
+
+nsc.xpn <- get(load("../Published_REST_Data/Johnson_ChIPPET/NS5/expression_data/AnnoRangedData_Limma.R"))
+nsc.xpn.df<-as.data.frame(nsc.xpn)
+
+esc.xpn <- get(load("../Published_REST_Data/Johnson_ChIPPET/ESC/expression_data/AnnoRangedData_Limma.R"))
+esc.xpn.df <- as.data.frame(esc.xpn)
+
+astro.xpn <- get(load("../Manu_DNRest_Astro_expression/expression_data/AnnoRangedData_Limma.R"))
+astro.xpn.df <- as.data.frame(astro.xpn)
+
+@ 
+
+Kee Yew has filtered the expression data and we can not get access to the original data, so not all of the probes on the array are in each of the expression datasets:
+<<>>=
+nrow(nsc.xpn.df)
+nrow(esc.xpn.df)
+nrow(astro.xpn.df)
+@ 
+
+
+Map the xpn data to the ChIPseq data.
+
+We don't want to use all 59,248 peaks - there'll be a very high false positive rate at that level. The eventual plan will be to remove crud on the basis of PCR validation and on enrichment of RE1 motif in the list, but as this hasn't been done yet, we'll just take the top 10K for now. 
+
+<<>>= 
+
+manu.chipseq.df <- manu.chipseq.df[order(manu.chipseq.df[,"values.neg10log10pVal"], decreasing=T),]
+
+#there are a few peaks which are freakishly large - almost certainly rubbish, chuck them
+rm <- which(manu.chipseq.df[,"values.Length"]>2000)
+if(length(rm)>0){manu.chipseq.df <- manu.chipseq.df[(-1*rm),]}
+
+#ok and take the top 10K as a ranged data
+data <- manu.chipseq.df[1:10000,]
+
+#fix the space to have chr prefix. 
+data$space <- paste("chr",data$space, sep="")
+
+#and for the expression data
+names(astro.xpn)<-paste("chr", names(astro.xpn), sep="")
+
+
+
+values <- grep('values', colnames(data), value=T)
+values <- gsub('values.','', values)
+colnames(data) <- gsub('values.','', colnames(data))
+
+top10K.rd <- RangedData(ranges = IRanges(
+                   start= data$start,
+                   end = data$end,
+                   names = data$names
+                   ),
+                 space = data$space,
+                 values = data[,values]
+                 )
+
+
+nr.probe.to.site <- nearest.rd(top10K.rd, astro.xpn)
+save(nr.probe.to.site, file="Macs/run4/top10Kchipseq_nr_probe_to_site.R")
+
+
+
+#write the results to a tab-sep file
+col.names <- T
+outfile.name <- 'Macs/run4/top10Kchipseq_nr_probe_to_site.csv'
+unlink(outfile.name)
+outfile <- file(outfile.name,'w')
+
+for(sp in names(nr.probe.to.site)){
+  this.df <- as.data.frame(top10K.rd[sp])
+  
+  this.res <- nr.probe.to.site[[sp]]
+  colnames(this.res) <- paste("nearest_astro_xpn_", colnames(this.res), sep="") 
+  this.df <- cbind(this.df, this.res) 
+  
+    
+  write.table(this.df, outfile, col.names=col.names, sep=",", append=T, qmethod="double", row.names=F)
+  col.names=F
+  
+}
+close(outfile)
+
+#and reload the data and sort on site p val:
+tmp.data <- read.csv(outfile.name)
+tmp.data <- tmp.data[order(tmp.data[,"values.neg10log10pVal"], decreasing=T),]
+write.csv(tmp.data, file=outfile.name, row.names=F)
+
+
+
+
+
+
+nr.site.to.probe <- nearest.rd(astro.xpn, top10K.rd)
+save(nr.site.to.probe, file="Macs/run4/top10Kchipseq_nr_site_to_probe.R")
+
+#write the results to a tab-sep file
+col.names <- T
+outfile.name <- 'Macs/run4/top10Kchipseq_nr_site_to_probe.csv'
+unlink(outfile.name)
+outfile <- file(outfile.name,'w')
+
+for(sp in names(nr.site.to.probe)){
+  this.df <- as.data.frame(astro.xpn[sp])
+  
+  #due to a small cock up, we need to convert strand data to 1/-1 from +/-
+  this.df$values.Strand <- as.character( this.df$values.Strand)
+  inds <- which(this.df$values.Strand=="-")
+  this.df$values.Strand <- 1
+  this.df$values.Strand[inds] <- -1
+
+  
+  this.res <- nr.site.to.probe[[sp]]
+  colnames(this.res) <- paste("nearest_ChIPseq_RE1_", colnames(this.res), sep="") 
+  this.df <- cbind(this.df, this.res) 
+  
+    
+  #calculate the distance between the start of the gene and the centre of the site.
+  #negative distance means upstream, positive downstream (in gene (as opposed to top strand) context
+  
+  centre <- floor((this.df[,"nearest_ChIPseq_RE1_start"] + this.df[,"nearest_ChIPseq_RE1_end"])/2)
+  distance.to.start <- (centre - this.df[,"start"]) * this.df[,"values.Strand"]
+  distance.to.end <- (centre - this.df[,"end"]) * this.df[,"values.Strand"]
+  closest.to <- rep('start', length(distance.to.start))
+  closest.to[which(abs(distance.to.start) > abs(distance.to.end))] = 'end'
+  
+  this.df <- cbind(this.df, distance.to.start, distance.to.end, closest.to)
+  write.table(this.df, outfile, col.names=col.names, sep=",", append=T, qmethod="double", row.names=F)
+  col.names=F
+  
+}
+close(outfile)
+
+#and reload the data and sort on probe p val:
+tmp.data <- read.csv(outfile.name)
+tmp.data <- tmp.data[order(tmp.data[,"values.pVal"]),]
+write.csv(tmp.data, file=outfile.name, row.names=F)
+
+@
+
+For the file where we have mapped the chipseq sites to their nearest probe, note that the 
+annotation for the nearest probe is not always the same as the nearest gene. Some genes are not
+represented in the array data (particularly as KeeYew has already filtered the data to remove stuff)
+
+
+OK, now make some plots of the distances to the gene start and so on?
+
+<<fig=T>>=
+nr.p2s.file <- 'Macs/run4/top10Kchipseq_nr_probe_to_site.csv'
+nr.s2p.file <- 'Macs/run4/top10Kchipseq_nr_site_to_probe.csv'
+nr.p2s <- read.csv(nr.p2s.file)
+nr.s2p <- read.csv(nr.s2p.file)
+
+#for nr.s2p:
+data.start <- nr.s2p[,qw(
+                values.log2FoldChange,
+                values.pVal,
+                values.FDR,
+                distance.to.start
+                      )]
+
+
+data.end <- nr.s2p[,qw(
+                      values.log2FoldChange,
+                      values.pVal,
+                      values.FDR,
+                      distance.to.end
+                      )]
+
+#start with a look at the distribution of distances, how close are the sites to their closest genes?
+plot(density(data.start[,"distance.to.start"]))
+plot(density(data.end[,"distance.to.end"]))
+
+#looks like we have a few, very far away, which we're not really interested in and mean the plot
+#has to be zoomed right out. Just have a look at the data within 1Mb?
+  
+data.start <- data.start[abs(data.start[,"distance.to.start"])<= 1000000,]
+data.end <- data.end[abs(data.end[,"distance.to.end"])<= 1000000,]
+
+
+
+data.start.fdr01<- which(data.start[,"values.FDR"]<= 0.01)
+data.end.fdr01<- which(data.end[,"values.FDR"]<= 0.01)
+plot(density(data.start[data.start.fdr01,"distance.to.start"]), col="red")
+lines(density(data.start[,"distance.to.start"]))
+plot(density(data.end[data.end.fdr01,"distance.to.end"]), col="red")
+lines(density(data.end[,"distance.to.end"]))
+
+
+data.start.p001<- which(data.start[,"values.pVal"]<= 0.001)
+data.end.p001<- which(data.end[,"values.pVal"]<= 0.001)
+plot(density(data.start[data.start.p001,"distance.to.start"]), col="red")
+lines(density(data.start[,"distance.to.start"]))
+plot(density(data.end[data.end.p001,"distance.to.end"]), col="red")
+lines(density(data.end[,"distance.to.end"]))
+
+
+data.start.fc2<- which(abs(data.start[,"values.log2FoldChange"])>=1)
+data.end.fc2<- which(abs(data.end[,"values.log2FoldChange"])>= 1)
+plot(density(data.start[data.start.fc2,"distance.to.start"]), col="red")
+lines(density(data.start[,"distance.to.start"]))
+plot(density(data.end[data.end.fc2,"distance.to.end"]), col="red")
+lines(density(data.end[,"distance.to.end"]))
+
+
+
+#and showing fc and sig at FDR 0.01
+
+plot(data.start[,"distance.to.start"], data.start[,"values.log2FoldChange"], pch=".")
+points(data.start[data.start.fdr01,"distance.to.start"], data.start[data.start.fdr01,"values.log2FoldChange"], col="red")
+
+
+plot(data.end[,"distance.to.end"], data.end[,"values.log2FoldChange"], pch=".")
+points(data.end[data.end.fdr01,"distance.to.end"], data.end[data.end.fdr01,"values.log2FoldChange"], col="red")
+
+
+
+@ 
+
+
+\end{document}
+

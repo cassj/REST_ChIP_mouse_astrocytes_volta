@@ -60,6 +60,8 @@ end
 
 #### Tasks ####
 
+# really these should have been derived from the raw data but
+# I'd already run them and I don't have time to redo everything 
 
 desc "upload BAM files"
 task :upload_bam, :roles => group_name do
