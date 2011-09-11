@@ -65,17 +65,25 @@ set :ssh_options, {
   :keys => [ENV['EC2_KEYFILE']],
   :user => "ubuntu"
 }
-set :sudo_password, ''
-set :ami, 'ami-52794c26' #32-bit ubuntu server (eu-west-1)
-set :instance_type, 'm1.small'
-set :working_dir, '/mnt/astrocytes'
+#set :ami, 'ami-52794c26' #32-bit ubuntu server (eu-west-1)
+set :ami, `curl http://mng.iop.kcl.ac.uk/cass_data/buckley_ami/AMIID`.chomp
+
+
+set :snap_id, `cat SNAPID`.chomp #empty until you've created a snapshot
+set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
+set :ebs_size, 20  
+set :availability_zone, 'eu-west-1a'  #wherever your ami is. 
+#set :dev, '/dev/sdf'
+set :dev, '/dev/xvdf'
+set :mount_point, '/mnt/data'
+set :instance_type, 'm1.large'
+set :working_dir, '/mnt/work'
 set :script_dir, '/mnt/scripts'
 
 set :group_name, 'restchipseq'
-set :nhosts, 2 # one per file
+set :nhosts, 1 # one per file
 
-set :git_url, ''
-
+set :git_url, 'http://github.com/cassj/REST_ChIP_mouse_astrocytes_volta/raw/master'
 
 
 

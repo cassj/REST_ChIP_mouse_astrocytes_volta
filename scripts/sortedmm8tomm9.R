@@ -96,7 +96,7 @@ liftOver.sorted <- function(data){
                      "end"   = as.numeric(data[,"match.pos"])
                      )
 
-  mapped.mm9 <- liftOver(to.map, chain.file="lib/mm8ToMm9.over.chain")
+  mapped.mm9 <- liftOver(to.map, chain.file="/mnt/work/lib/mm8ToMm9.over.chain")
   
   #and stick the results back in the dataframe
   data[,"match.chr"] <- as.character(mapped.mm9[,"chr"])
