@@ -28,7 +28,7 @@ set :nhosts, 1
 
 set :snap_id, `cat SNAPID`.chomp #empty until you've created a snapshot
 set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
-set :ebs_size, 12  
+set :ebs_size, 50  
 set :availability_zone, 'eu-west-1a'  #wherever your ami is. 
 #set :dev, '/dev/sdf'
 set :dev, '/dev/xvdf'
@@ -183,6 +183,13 @@ task :index_bam, :roles => group_name do
   run "samtools index /mnt/data/CMN026_026_unique_hits_mm9_sorted_nodup.bam"
 end
 before "index_bam", "EC2:start"
+
+desc "summarise_bam"
+task :summarise_bam, :roles => group_name do
+  run "samtools flagstat /mnt/data/CMN025_180_unique_hits_mm9_sorted_nodup.bam > /mnt/data/CMN025_180_unique_hits_mm9_sorted_nodup.summary"
+  run "samtools flagstat /mnt/data/CMN026_026_unique_hits_mm9_sorted_nodup.bam > /mnt/data/CMN026_026_unique_hits_mm9_sorted_nodup.summary"
+end
+before "summarise_bam", "EC2:start"
 
 desc "get results"
 task :get_results, :roles => group_name do  
