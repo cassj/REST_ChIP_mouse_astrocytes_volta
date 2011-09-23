@@ -30,8 +30,8 @@ set :snap_id, `cat SNAPID`.chomp #empty until you've created a snapshot
 set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
 set :ebs_size, 50  
 set :availability_zone, 'eu-west-1a'  #wherever your ami is. 
-#set :dev, '/dev/sdf'
-set :dev, '/dev/xvdf'
+set :dev, '/dev/sdf'
+#set :dev, '/dev/xvdf'
 set :mount_point, '/mnt/data'
 set :script_dir, '/mnt/work/scripts'
 set :git_url, 'https://github.com/cassj/REST_ChIP_mouse_astrocytes_volta/raw/master'
@@ -268,7 +268,7 @@ before 'peaks_to_iranges', 'EC2:start'
 desc "annotate IRanges"
 task :annotate_peaks, :roles => group_name do
   run "cd #{working_dir} && rm -f mm9RDtoGenes.R"
-  upload('scripts/mm9RDtoGenes.R', "#{working_dir}/mm9RDtoGenes.R")
+  upload('/space/cassj/chipseq_pipeline/mm9RDtoGenes.R', "#{working_dir}/mm9RDtoGenes.R")
   run "cd #{working_dir} && chmod +x mm9RDtoGenes.R"
   macs_dirs = capture "ls #{mount_point}"
   macs_dirs = macs_dirs.split("\n").select { |d| d =~ /.*macs.*/ }
